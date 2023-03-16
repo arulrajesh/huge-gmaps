@@ -9,13 +9,21 @@ from PIL import Image
 import pyscreenshot
 from selenium import webdriver
 
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+omnibox = "//div[@id='omnibox-container']"
+asc = "//div[@id='assistive-chips']"
+signi= "//div[@id='vasquette']"
+mim = "//div[@id='minimap']"
+elems =[omnibox,asc,signi]
 
 def create_map(lat_start: float, long_start: float,
                number_rows: int, number_cols: int,
                scale: float=1, sleep_time: float=0,
                offset_left: float=0, offset_top: float=0,
                offset_right: float=0, offset_bottom: float=0,
-               outfile: str=None):
+               outfile: str=None, cons_lat:float=0.000004109, cons_lon:float = 0.000005363):
     """Create a big Google Map image from a grid of screenshots.
 
     ARGS:
@@ -43,12 +51,14 @@ def create_map(lat_start: float, long_start: float,
             working directory with name 'testimg-<timestamp>.png'
     """
     if outfile:
+        pass
         # Make sure the path doesn't exist, is writable, and is a .PNG
-        assert not os.path.exists(outfile)
-        assert os.access(os.path.dirname(os.path.abspath(outfile)), os.W_OK)
-        assert outfile.upper().endswith('.PNG')
-
-    driver = webdriver.Firefox()
+    #    assert not os.path.exists(outfile)
+    #    assert os.access(os.path.dirname(os.path.abspath(outfile)), os.W_OK)
+    #    assert outfile.upper().endswith('.PNG')
+    options = Options()
+    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+    driver = webdriver.Chrome(service= Service(ChromeDriverManager().install()),options=options)
     driver.maximize_window()
     # 2D grid of Images to be stitched together
     images = [[None for _ in range(number_cols)]
@@ -57,9 +67,9 @@ def create_map(lat_start: float, long_start: float,
     # Calculate amount to shift lat/long each screenshot
     screen_width, screen_height = get_screen_resolution()
     lat_shift = calc_latitude_shift(screen_height,
-                                    (offset_top + offset_bottom))
+                                    (offset_top + offset_bottom),cons_lat)
     long_shift = calc_longitude_shift(screen_width,
-                                      (offset_left + offset_right))
+                                      (offset_left + offset_right),cons_lon)
 
     for row in range(number_rows):
         for col in range(number_cols):
@@ -72,10 +82,17 @@ def create_map(lat_start: float, long_start: float,
             driver.get(url)
             # Let the map load all assets before taking a screenshot
             time.sleep(sleep_time)
+            for elem in elems:
+                try:
+                    ele = driver.find_element('xpath',elem)
+                    driver.execute_script("return arguments[0].remove();", ele)
+                except Exception as e:
+                    raise e
             image = screenshot(screen_width, screen_height,
                                offset_left, offset_top,
                                offset_right, offset_bottom)
             # Scale image up or down if desired, then save in memory
+            image.save(f'images\im{row}{col}.png')
             images[row][col] = scale_image(image, scale)
 
     driver.close()
@@ -83,9 +100,11 @@ def create_map(lat_start: float, long_start: float,
 
     # Combine all the images into one, then save it to disk
     final = combine_images(images)
-    if not outfile:
-        timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-        outfile = 'testimg-{}.png'.format(timestamp)
+    
+    #if not outfile:
+    #    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    #    outfile = 'testimg-{}.png'.format(timestamp)
+    #    
     final.save(outfile)
 
 
@@ -96,14 +115,14 @@ def get_screen_resolution() -> tuple:
     return (root.winfo_screenwidth(), root.winfo_screenheight())
 
 
-def calc_latitude_shift(screen_height: int, percent_hidden: float) -> float:
+def calc_latitude_shift(screen_height: int, percent_hidden: float, cons) -> float:
     """Return the amount to shift latitude per row of screenshots."""
-    return -0.000002051 * screen_height * (1 - percent_hidden)
+    return -(cons) * screen_height * (1 - percent_hidden)
 
 
-def calc_longitude_shift(screen_width: int, percent_hidden: float) -> float:
+def calc_longitude_shift(screen_width: int, percent_hidden: float, cons) -> float:
     """Return the amount to shift longitude per column of screenshots."""
-    return 0.00000268 * screen_width * (1 - percent_hidden)
+    return (cons) * screen_width * (1 - percent_hidden)
 
 
 def screenshot(screen_width: int, screen_height: int,
@@ -114,7 +133,7 @@ def screenshot(screen_width: int, screen_height: int,
     y1 = offset_top * screen_height
     x2 = (offset_right * -screen_width) + screen_width
     y2 = (offset_bottom * -screen_height) + screen_height
-    image = pyscreenshot.grab(bbox=(x1, y1, x2, y2))
+    image = pyscreenshot.grab(bbox=(int(x1), int(y1), int(x2), int(y2)))
     return image
 
 
